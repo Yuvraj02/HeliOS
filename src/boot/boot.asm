@@ -1,4 +1,5 @@
 ORG 0x7c00
+
 BITS 16
 
 CODE_SEG equ gdt_code - gdt_start
@@ -32,8 +33,8 @@ load_protectd:
     mov eax, cr0
     or eax,0x1
     mov cr0,eax
-    jmp CODE_SEG:load32
-
+    ;jmp CODE_SEG:load32
+    jmp $
 gdt_start:
 gdt_null: ;Set 64 bits to null
     dd 0x0 ; 32-bit
@@ -65,20 +66,15 @@ gdt_descriptor:
 
 [BITS 32]
 load32:
-    mov ax,DATA_SEG
-    mov ds,ax
-    mov es,ax
-    mov gs,ax
-    mov fs,ax
-    mov ss,ax
-    mov ebp,0x00200000 ; avoids conflicting with system-specific memory regions, that's why this memory location is chosen for protected mode 
-    mov esp, ebp  
+    mov eax, 1      ; Representing starting sector, not 0, because it's the boot sector, so 1
+    mov ecx, 100    ; Total sectors
+    mov edi, 0x0100000 ;Address where we want to load the sectors
+    call ata_lba_read ;
 
-    ;Enabling A20 line
-    in al,0x92
-    or al,2
-    out 0x92,al
-    jmp $
+ata_lba_read:
+    mov ebx,eax  ;Backup the LBA
+    ;Send highest 8 bits of the lba to hard disk controller
+    shr eax, 24  ;shift 24 bits to right
 
 times 510-($-$$) db 0
 dw 0xAA55
