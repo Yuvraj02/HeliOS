@@ -30,11 +30,11 @@ start:
 load_protectd:
     cli
     lgdt[gdt_descriptor]
-    mov eax, cr0
+    mov eax, cr0 ; cr0 registers let's us change from real mode to protected mode
     or eax,0x1
     mov cr0,eax
-    ;jmp CODE_SEG:load32
-    jmp $
+    jmp CODE_SEG:load32
+    
 gdt_start:
 gdt_null: ;Set 64 bits to null
     dd 0x0 ; 32-bit
@@ -70,11 +70,71 @@ load32:
     mov ecx, 100    ; Total sectors
     mov edi, 0x0100000 ;Address where we want to load the sectors
     call ata_lba_read ;
+    jmp CODE_SEG:0x0100000 ; Jump to code segment after reading all sectors (Entry point of our kernel)
 
 ata_lba_read:
-    mov ebx,eax  ;Backup the LBA
-    ;Send highest 8 bits of the lba to hard disk controller
-    shr eax, 24  ;shift 24 bits to right
+    mov ebx,eax     ;Backup the LBA
+    ;Send highest 8 bits (24-32) of the LBA to hard disk controller
+    shr eax, 24     ; shift 24 bits to right
+    or eax, 0xE0    ; Selecting  Master drive 
+    mov dx, 0x1F6   ; Port where we have to send the highest 8 bits to
+    out dx, al      ; As the bits are shifted 24 towards right,
+                    ; The highest 8 bits are now in the lowest 8 bits of AX register
+    
+    ;Finished sending highest 8 bits of LBA
+
+    ;Sending Total No. of sectors to the hard disk controller
+    mov eax,ecx     ; Store the sectors to EBX register first
+    mov dx, 0x1F2   ; Port to send the data to
+    out dx, al      ; Send the data to the port
+    ;Finished sending total No of sectors to the disk controller 
+
+    ;Sending bits 0-7 of the LBA (Low 8 bits)
+    mov eax, ebx    ; Restoring the backup LBA
+    mov dx, 0x1F3   ; Port to send bit 0 - 7 of LBA
+    out dx, al;
+    ;Finished sending more bits to the disk controller
+
+    ;Sending bits 8-15 of the LBA (Mid 8 bits)
+    mov eax,ebx     ; Restoring the backup LBA
+    mov dx, 0x1F4   ; Port to send the mid 8 bits
+    shr eax, 8      ; shift 8 bits towards right to get mid 8 bits
+    out dx, al      ; Sending the mid 8 bits to the port
+    ;Finished sending Middle bits  of the LBA
+
+    ;Sending bits 16-23 of the LBA (High 8 bits)
+    mov eax, ebx
+    mov dx, 0x1F5 ; Port to send bits 16-23
+    shr eax, 16
+    out dx, al
+    ;Finished sending the High 8 bits 
+    
+    mov dx,0x1F7
+    mov al, 0x20
+    out dx, al
+
+    ;Read all sectors in memory
+.next_sector:
+    push ecx ;Save register in stack to retrive the value later
+
+    ;Checking if we need to read     
+.try_again:
+    mov dx, 0x1F7 ;Port used to send commands to the ATA device
+    in al,dx
+    test al, 8 ; ANDing the content of al register with 8 and setting up ZF flag accordingly
+    jz .try_again ; if the result is a zero then try again
+
+; We need to read 256 words at a time
+    mov ecx,256     ; Putting value 256 in ecx
+    mov dx, 0x1F0   ; Data port, I/O
+    rep insw        ; Take 256 words i.e 512 bytes of data which means 1 sector
+                    ; insw reads a word from I/O port and put into location specified in [ES:(E)DI]
+                    ; [ES = 0 and EDI = 0x0100000] in our case so absolute address = [0x0100000]
+    pop ecx; Restore the value (sector numbers)
+    loop .next_sector ; Now loop and decremenet sector numbers, Basically, read all sectors upto 1 and when 0 return
+    
+    ;End of reading sectors into memory
+    ret
 
 times 510-($-$$) db 0
 dw 0xAA55
